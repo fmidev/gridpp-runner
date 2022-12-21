@@ -18,5 +18,6 @@ WORKDIR /gridpp-runner
 
 ADD https://lake.fmi.fi/dem-data/DEM_100m-Int16.tif /gridpp-runner
 
-RUN update-alternatives --set python3 /usr/bin/python3.8 && \
-    python3 -m pip --no-cache-dir install -r gridpp/requirements.txt
+RUN chmod 644 DEM_100m-Int16.tif && \
+    update-alternatives --set python3 /usr/bin/python3.8 && \
+    python3 -m pip --no-cache-dir install -r requirements.txt
