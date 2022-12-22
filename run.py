@@ -183,9 +183,6 @@ def read_conventional_obs(args, obstime):
 
     trad_obs = []
 
-    lons = []
-    lats = []
-
     # conventional obs are read from two distinct smartmet server producers
     # if read fails, abort program
 
