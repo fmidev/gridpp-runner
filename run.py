@@ -129,12 +129,12 @@ def read_grib(gribfile, read_coordinates=False):
         analysistime = datetime.datetime.strptime(
             "{}.{:04d}".format(dataDate, dataTime), "%Y%m%d.%H%M"
         )
-        assert forecastTime == 0
+        forecasttime = analysistime + datetime.timedelta(hours=forecastTime)
 
         values = ecc.codes_get_values(gh).reshape(nj, ni)
 
         if read_coordinates == False:
-            return None, None, values, analysistime
+            return None, None, values, analysistime, forecasttime
 
         projstr = get_projstr(gh)
 
@@ -160,25 +160,26 @@ def read_grib(gribfile, read_coordinates=False):
             np.asarray(lats).reshape(nj, ni),
             values,
             analysistime,
+            forecasttime,
         )
 
 
 def read_grid(args):
     """Top function to read all gridded data"""
 
-    lons, lats, vals, analysistime = read_grib(args.parameter_data, True)
+    lons, lats, vals, analysistime, forecasttime = read_grib(args.parameter_data, True)
 
-    _, _, topo, _ = read_grib(args.topography_data, False)
-    _, _, lc, _ = read_grib(args.landseacover_data, False)
+    _, _, topo, _, _ = read_grib(args.topography_data, False)
+    _, _, lc, _, _ = read_grib(args.landseacover_data, False)
 
     grid = gridpp.Grid(lats, lons, topo)
-    return grid, lons, lats, vals, analysistime
+    return grid, lons, lats, vals, analysistime, forecasttime
 
 
-def read_conventional_obs(args, time):
+def read_conventional_obs(args, obstime):
     parameter = args.parameter
 
-    timestr = time.strftime("%Y%m%d%H%M%S")
+    timestr = obstime.strftime("%Y%m%d%H%M%S")
 
     trad_obs = []
 
@@ -217,10 +218,10 @@ def read_conventional_obs(args, time):
     return obs
 
 
-def read_netatmo_obs(args, time):
+def read_netatmo_obs(args, obstime):
     url = "http://smartmet.fmi.fi/timeseries?producer=NetAtmo&tz=gmt&precision=auto&starttime={}&endtime={}&param=station_id,longitude,latitude,utctime,temperature&format=json&data_quality=1&keyword=snwc".format(
-        (time - datetime.timedelta(minutes=10)).strftime("%Y%m%d%H%M%S"),
-        time.strftime("%Y%m%d%H%M%S"),
+        (obstime - datetime.timedelta(minutes=10)).strftime("%Y%m%d%H%M%S"),
+        obstime.strftime("%Y%m%d%H%M%S"),
     )
 
     resp = requests.get(url)
@@ -279,16 +280,16 @@ def read_netatmo_obs(args, time):
     return obs
 
 
-def read_obs(args, analysistime):
+def read_obs(args, obstime):
     """Read observations from smartmet server"""
 
-    obs = read_conventional_obs(args, analysistime)
+    obs = read_conventional_obs(args, obstime)
 
     # for temperature we also have netatmo stations
     # these are optional
 
     if args.parameter == "temperature":
-        netatmo = read_netatmo_obs(args, analysistime)
+        netatmo = read_netatmo_obs(args, obstime)
         if netatmo is not None:
             obs = pd.concat((obs, netatmo))
 
@@ -303,7 +304,7 @@ def read_obs(args, analysistime):
     return points, obs
 
 
-def write_grib_message(fp, args, analysistime, data):
+def write_grib_message(fp, args, analysistime, forecasttime, data):
 
     levelvalue = 2
     pnum = 0
@@ -334,6 +335,9 @@ def write_grib_message(fp, args, analysistime, data):
     ecc.codes_set(h, "longitudeOfSouthernPoleInDegrees", 0)
     ecc.codes_set(h, "dataDate", int(analysistime.strftime("%Y%m%d")))
     ecc.codes_set(h, "dataTime", int(analysistime.strftime("%H%M")))
+    ecc.codes_set(
+        h, "forecastTime", int((forecasttime - analysistime).total_seconds() / 3600)
+    )
     ecc.codes_set(h, "centre", 86)
     ecc.codes_set(h, "generatingProcessIdentifier", 203)
     ecc.codes_set(h, "discipline", 0)
@@ -351,10 +355,9 @@ def write_grib_message(fp, args, analysistime, data):
     ecc.codes_release(h)
 
 
-def write_grib(args, analysistime, data):
+def write_grib(args, analysistime, forecasttime, data):
 
     if args.output.startswith("s3://"):
-        #    filename = 's3://routines-data/smartmet-nwc/development/2.5/{}/gridpp-{}.grib2'.format(analysistime.strftime('%Y%m%d%H'), param_name)
         openfile = fsspec.open(
             "simplecache::{}".format(args.output),
             "wb",
@@ -366,10 +369,10 @@ def write_grib(args, analysistime, data):
             },
         )
         with openfile as fpout:
-            write_grib_message(fpout, args, analysistime, data)
+            write_grib_message(fpout, args, analysistime, forecasttime, data)
     else:
         with open(args.output, "wb") as fpout:
-            write_grib_message(fpout, args, analysistime, data)
+            write_grib_message(fpout, args, analysistime, forecasttime, data)
 
     print(f"Wrote file {args.output}")
 
@@ -421,18 +424,18 @@ def main():
     # * actual payload data
 
     print("Reading background data")
-    grid, lons, lats, background, analysistime = read_grid(args)
+    grid, lons, lats, background, analysistime, forecasttime = read_grid(args)
 
     # Read observations from smartmet server
 
     print("Reading observation data")
-    points, obs = read_obs(args, analysistime)
+    points, obs = read_obs(args, forecasttime)
 
     # Perform interpolation
 
     output = interpolate(grid, points, background, obs, args)
 
-    write_grib(args, analysistime, output)
+    write_grib(args, analysistime, forecasttime, output)
 
     if args.plot:
         plot(obs, background, output, lons, lats, args)
@@ -448,7 +451,12 @@ def plot(obs, background, output, lons, lats, args):
 
     plt.subplot(1, 3, 1)
     plt.pcolormesh(
-        np.asarray(lons), np.asarray(lats), background, cmap="RdBu_r", vmin=vmin, vmax=vmax
+        np.asarray(lons),
+        np.asarray(lats),
+        background,
+        cmap="RdBu_r",
+        vmin=vmin,
+        vmax=vmax,
     )
 
     plt.xlim(0, 35)
