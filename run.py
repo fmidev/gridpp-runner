@@ -393,7 +393,7 @@ def interpolate(grid, points, background, obs, args):
     # error variance ratio between observations and background
     # smaller values -> more trust to observations
 
-    obs_to_background_variance_ratio = np.full(points.size(), 0.2)
+    obs_to_background_variance_ratio = np.full(points.size(), 0.0)
 
     # perform optimal interpolation
 
