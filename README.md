@@ -28,7 +28,7 @@ For example:
 
 ```
 python3 run.py --parameter temperature \
-               --topography_data mnwc-Z-M2S2.grib2 \
+               --topography_data mnwc-ZH-GPM.grib2 \
                --parameter_data mnwc-T-K.grib2 \
                --landseacover_data mnwc-LC-0TO1.grib2 \
                --output T-K.grib2
