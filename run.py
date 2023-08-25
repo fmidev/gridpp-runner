@@ -236,7 +236,7 @@ def read_netatmo_obs(args, obstime):
 
     obs = None
 
-    if crowd_obs is not None:
+    if crowd_obs is not None and len(crowd_obs) > 0:
         obs = pd.DataFrame(crowd_obs)
 
         # netatmo obs do not contain elevation information, but we need thatn
